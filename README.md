@@ -134,6 +134,19 @@ python3 main.py \
   --vllm_server_max_concurrency 8
 ```
 
+Checkpoints are saved under `--output_dir` (e.g. `./output/checkpoint-100`, `./output/checkpoint-200`, ...).
+To resume training after stopping, re-run with:
+
+```bash
+python3 main.py --output_dir ./output --resume_from_checkpoint true ...
+```
+
+…or pass an explicit checkpoint path:
+
+```bash
+python3 main.py --output_dir ./output --resume_from_checkpoint ./output/checkpoint-200 ...
+```
+
 Shorthand: you can also pass the teacher server base URL as the first positional argument, e.g.:
 
 ```bash

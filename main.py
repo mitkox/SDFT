@@ -269,7 +269,9 @@ def main() -> None:
         print("Dry run complete.")
         return
 
-    trainer.train()
+    # Support resuming from a checkpoint via `--resume_from_checkpoint` (Transformers 5+).
+    resume_from_checkpoint = getattr(train_cfg, "resume_from_checkpoint", None)
+    trainer.train(resume_from_checkpoint=resume_from_checkpoint)
 
 
 if __name__ == "__main__":
