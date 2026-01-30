@@ -49,11 +49,12 @@ Now answer with a response of your own, including the thinking process.
 if __name__ == "__main__":
     args = parse_args()
     print("Loading model with memory optimization...")
+    # GPU enabled with PyTorch nightly (CUDA 13.0) for GB10 support
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name,
         torch_dtype=torch.bfloat16,
         trust_remote_code=True,
-        device_map="auto",  # Load on GPU for faster training
+        device_map="auto",  # GPU with PyTorch nightly cu130
         low_cpu_mem_usage=True,
     )
     # External vLLM server (GLM-4.7) generates completions; no local teacher needed
@@ -79,7 +80,7 @@ if __name__ == "__main__":
         warmup_ratio = 0.1,
         lr_scheduler_type = "cosine",
         logging_steps = 1,
-        bf16 = True,
+        bf16 = True,  # GPU supports bfloat16
         fp16 = False,
         per_device_train_batch_size = 1,
         gradient_accumulation_steps = args.num_prompts_per_batch,

@@ -40,15 +40,27 @@ conda activate distillation
 
 ### 3. Install dependencies
 
+**For NVIDIA GB10 GPU (CUDA 13.0/13.1 - RTX 50 series):**
+
 ```bash
+# Install PyTorch nightly with CUDA 13.0 support first
+pip uninstall -y torch torchvision torchaudio
+pip install --pre --upgrade --no-cache-dir \
+  torch torchvision torchaudio \
+  --index-url https://download.pytorch.org/whl/nightly/cu130
+
+# Then install other dependencies
 pip install -r requirements.txt
 ```
 
-**Important**: If you have a newer NVIDIA GPU (e.g., GB10), you may need to upgrade PyTorch:
+**For older GPUs (CUDA 12.4 and below):**
 
 ```bash
+pip install -r requirements.txt
 pip install --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 ```
+
+**Note**: The dependency conflict warning about `cuda-python` and `cuda-bindings` versions is expected and won't affect functionality.
 
 ### 4. Set up the Teacher Model (vLLM Server)
 
@@ -132,11 +144,17 @@ The training uses the following key configurations:
 
 ## Troubleshooting
 
-### CUDA Compatibility Error
-If you see "no kernel image is available for execution on the device", upgrade PyTorch:
+### CUDA Compatibility Error (GB10 GPU)
+If you see "no kernel image is available for execution on the device" with NVIDIA GB10 (RTX 50 series), you need PyTorch nightly:
+
 ```bash
-pip install --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+pip uninstall -y torch torchvision torchaudio
+pip install --pre --upgrade --no-cache-dir \
+  torch torchvision torchaudio \
+  --index-url https://download.pytorch.org/whl/nightly/cu130
 ```
+
+**Note**: You may see a dependency conflict warning about `cuda-python` and `cuda-bindings` versions. This is expected and won't prevent the code from working.
 
 ### vLLM Server Connection Error
 Ensure your vLLM server is running and accessible:

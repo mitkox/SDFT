@@ -1,5 +1,7 @@
 datasets==4.3.0
-torch==2.9.0
+# PyTorch nightly for GB10 GPU (CUDA 13.0/13.1) support
+# Install with: pip install --pre --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu130
+# torch==2.11.0.dev (nightly)
 transformers>=5.0.0
 accelerate==1.11.0
 peft==0.17.1
