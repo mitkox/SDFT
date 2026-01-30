@@ -458,7 +458,12 @@ class DistilTrainer(BaseTrainer):
                         base_url = args.vllm_server_base_url
                     else:
                         base_url = f"http://{args.vllm_server_host}:{args.vllm_server_port}"
-                    self.vllm_client = VLLMClient(base_url=base_url, connection_timeout=args.vllm_server_timeout)
+                    # Extract tokenizer from processing_class for text->token conversion
+                    if isinstance(self.processing_class, ProcessorMixin):
+                        client_tokenizer = self.processing_class.tokenizer
+                    else:
+                        client_tokenizer = self.processing_class
+                    self.vllm_client = VLLMClient(base_url=base_url, connection_timeout=args.vllm_server_timeout, tokenizer=client_tokenizer)
                     self.vllm_client.init_communicator(device=torch.cuda.current_device())
 
             elif self.vllm_mode == "colocate":

@@ -10,10 +10,11 @@ import torch
 class VLLMClient:
     """HTTP client for external vLLM server that mimics TRL's VLLMClient interface."""
     
-    def __init__(self, base_url: str, connection_timeout: int = 600):
+    def __init__(self, base_url: str, connection_timeout: int = 600, tokenizer=None):
         self.base_url = base_url.rstrip('/')
         self.timeout = connection_timeout
         self.session = requests.Session()
+        self.tokenizer = tokenizer  # Store tokenizer for text->token conversion
         
     def init_communicator(self, device: Optional[torch.device] = None):
         """Initialize communicator (no-op for HTTP client)."""
@@ -27,6 +28,10 @@ class VLLMClient:
     def reset_prefix_cache(self):
         """Reset prefix cache (no-op for HTTP client)."""
         pass
+    
+    def set_tokenizer(self, tokenizer):
+        """Set tokenizer for converting text to token IDs."""
+        self.tokenizer = tokenizer
     
     def generate(
         self,
@@ -107,12 +112,30 @@ class VLLMClient:
                     if 'choices' in data and len(data['choices']) > 0:
                         choice = data['choices'][0]
                         
-                        # For distillation we need token IDs
-                        # Since OpenAI API doesn't return token IDs directly,
-                        # we'll use empty lists as placeholders
-                        # The trainer will re-tokenize if needed
-                        all_prompt_ids.append([])  # Placeholder
-                        all_completion_ids.append([])  # Placeholder
+                        # Extract the completion text from the message
+                        completion_text = ""
+                        if 'message' in choice and 'content' in choice['message']:
+                            completion_text = choice['message']['content']
+                        elif 'text' in choice:
+                            completion_text = choice['text']
+                        
+                        if not completion_text:
+                            print(f"Warning: No text found in response: {choice}")
+                            all_prompt_ids.append([])
+                            all_completion_ids.append([1])  # Add dummy token to avoid empty list
+                            all_logprobs.append([])
+                            continue
+                        
+                        # Tokenize the completion text if tokenizer is available
+                        if self.tokenizer:
+                            completion_ids = self.tokenizer.encode(completion_text, add_special_tokens=False)
+                        else:
+                            # Fallback: return dummy token IDs
+                            print("Warning: No tokenizer set, using dummy token IDs")
+                            completion_ids = [1] * min(len(completion_text.split()), max_tokens)
+                        
+                        all_prompt_ids.append([])  # Placeholder - prompt  already tokenized by trainer
+                        all_completion_ids.append(completion_ids)
                         
                         # Extract logprobs if available
                         if 'logprobs' in choice and choice['logprobs']:
@@ -121,8 +144,9 @@ class VLLMClient:
                         else:
                             all_logprobs.append([])
                     else:
+                        print(f"Warning: No choices in response: {data}")
                         all_prompt_ids.append([])
-                        all_completion_ids.append([])
+                        all_completion_ids.append([1])  # Dummy token to avoid empty list
                         all_logprobs.append([])
                         
                 except Exception as e:
