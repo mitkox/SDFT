@@ -47,6 +47,37 @@ def _cli_has_flag(flag: str) -> bool:
     return any(arg == flag or arg.startswith(f"{flag}=") for arg in sys.argv)
 
 
+def _maybe_consume_positional_vllm_base_url() -> Optional[str]:
+    """
+    Allow `python main.py localhost:8000 ...` as a shorthand for `--vllm_server_base_url`.
+
+    Hugging Face's `HfArgumentParser` does not support positional arguments; any extra token would
+    otherwise raise an "arguments are not used" error.
+    """
+    if len(sys.argv) < 2:
+        return None
+    candidate = sys.argv[1]
+    if candidate.startswith("-"):
+        return None
+
+    # Accept http(s) URLs, host:port, or [ipv6]:port.
+    lowered = candidate.lower()
+    looks_like_url = lowered.startswith("http://") or lowered.startswith("https://")
+    looks_like_host_port = (
+        "/" not in candidate
+        and ":" in candidate
+        and candidate.rsplit(":", 1)[-1].isdigit()
+        and not lowered.startswith("file:")
+    )
+    if not (looks_like_url or looks_like_host_port):
+        return None
+
+    sys.argv.pop(1)
+    if looks_like_url:
+        return candidate
+    return f"http://{candidate}"
+
+
 def _configure_torch_for_cuda() -> None:
     if not torch.cuda.is_available():
         return
@@ -118,6 +149,8 @@ Now answer the original question in your own words. Explain your reasoning clear
 
 
 def main() -> None:
+    positional_base_url = _maybe_consume_positional_vllm_base_url()
+
     parser = HfArgumentParser((RunConfig, DistilConfig))
     run_cfg, train_cfg = parser.parse_args_into_dataclasses()
 
@@ -150,9 +183,14 @@ def main() -> None:
         train_cfg.vllm_importance_sampling_correction = False
 
     if train_cfg.use_vllm and train_cfg.vllm_mode == "server":
-        if not _cli_has_flag("--vllm_server_base_url") and not _cli_has_flag("--vllm_server_host"):
+        if positional_base_url is not None and not _cli_has_flag("--vllm_server_base_url"):
+            train_cfg.vllm_server_base_url = positional_base_url
+
+        base_url_set = train_cfg.vllm_server_base_url is not None
+
+        if not base_url_set and not _cli_has_flag("--vllm_server_host"):
             train_cfg.vllm_server_host = "localhost"
-        if not _cli_has_flag("--vllm_server_base_url") and not _cli_has_flag("--vllm_server_port"):
+        if not base_url_set and not _cli_has_flag("--vllm_server_port"):
             train_cfg.vllm_server_port = 8000
         if not _cli_has_flag("--vllm_server_model"):
             train_cfg.vllm_server_model = "glm-4.7"

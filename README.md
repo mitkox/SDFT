@@ -134,6 +134,12 @@ python3 main.py \
   --vllm_server_max_concurrency 8
 ```
 
+Shorthand: you can also pass the teacher server base URL as the first positional argument, e.g.:
+
+```bash
+python3 main.py http://localhost:8000 --output_dir ./output --vllm_server_model glm-4.7
+```
+
 If your machine cannot download from Hugging Face (offline), add `--local_files_only` and make sure the model is cached.
 
 Dataset selection behavior:
