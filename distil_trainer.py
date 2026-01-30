@@ -48,7 +48,8 @@ from transformers.utils import is_datasets_available, is_flash_attn_2_available,
 
 from trl.data_utils import apply_chat_template, is_conversational, maybe_apply_chat_template, prepare_multimodal_messages
 from trl.extras.profiling import profiling_context, profiling_decorator
-from trl.extras.vllm_client import VLLMClient
+# Use custom HTTP client for external vLLM server instead of TRL's VLLMClient
+from vllm_http_client import VLLMClient
 from trl.import_utils import is_liger_kernel_available, is_vllm_available
 from trl.models import prepare_deepspeed, prepare_fsdp, prepare_peft_model, unwrap_model_for_generation
 from trl.models.utils import _ForwardRedirection
@@ -444,11 +445,12 @@ class DistilTrainer(BaseTrainer):
         set_seed(args.seed, device_specific=True)
 
         if self.use_vllm:
-            if not is_vllm_available():
-                raise ImportError(
-                    "vLLM is not available and `use_vllm` is set to True. Please install vLLM with "
-                    "`pip install trl[vllm]` to use it."
-                )
+            # Skip vLLM availability check when using external server
+            # if not is_vllm_available():
+            #     raise ImportError(
+            #         "vLLM is not available and `use_vllm` is set to True. Please install vLLM with "
+            #         "`pip install trl[vllm]` to use it."
+            #     )
 
             if self.vllm_mode == "server":
                 if self.accelerator.is_main_process:

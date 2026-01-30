@@ -489,6 +489,12 @@ class DistilConfig(TrainingArguments):
             "help": "Alpha coefficient. If `0.0` (default), the forward KL is used. If `1.0`, the reverse KL is used. If anything in between, the Jensen-Shannon Divergence is used."
         },
     )
+    full_logit_distillation: bool = field(
+        default=False,
+        metadata={
+            "help": "If True, use full logit distillation from teacher to student. If False (default), use standard RL."
+        },
+    )
     generate_from_teacher: bool = field(
         default=False,
         metadata={

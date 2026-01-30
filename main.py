@@ -14,7 +14,7 @@ def parse_args():
     parser.add_argument("--num_prompts_per_batch", type=int, default=32, help="Number of prompts per batch")
     parser.add_argument("--ref_model_mixup_alpha", type=float, default=0.01, help="Reference model mixup alpha")
     parser.add_argument("--output_dir", type=str, help="Output directory")
-    parser.add_argument("--model_name", type=str, default="Qwen/Qwen2.5-7B-Instruct", help="Model name")
+    parser.add_argument("--model_name", type=str, default="Qwen/Qwen3-0.6B", help="Model name")
     parser.add_argument("--seed", type=int, default=42, help="Seed")
     return parser.parse_args()
 
@@ -48,24 +48,33 @@ Now answer with a response of your own, including the thinking process.
 
 if __name__ == "__main__":
     args = parse_args()
+    print("Loading model with memory optimization...")
     model = AutoModelForCausalLM.from_pretrained(
         args.model_name,
         torch_dtype=torch.bfloat16,
+        trust_remote_code=True,
+        device_map="auto",  # Load on GPU for faster training
+        low_cpu_mem_usage=True,
     )
-    teacher_model = AutoModelForCausalLM.from_pretrained(
-        args.model_name,
-        torch_dtype=torch.bfloat16,
+    # External vLLM server (GLM-4.7) generates completions; no local teacher needed
+    teacher_model = None
+    tokenizer = AutoTokenizer.from_pretrained(
+        args.model_name, 
+        trust_remote_code=True,
+        local_files_only=True  # Use cached files only, don't contact HuggingFace
     )
-    tokenizer = AutoTokenizer.from_pretrained(args.model_name)
-    dataset = load_tooluse_dataset(args.seed)
+    dataset, _ = load_tooluse_dataset(args.seed)  # Unpack tuple
 
     config = DistilConfig(
         seed=args.seed,
         use_vllm = True,
-        vllm_mode="colocate",
+        vllm_mode="server",  # Use external GLM-4.7 teacher server
+        vllm_server_host="localhost",
+        vllm_server_port=8000,
+        # generate_from_teacher not needed - server mode uses external vLLM model automatically
         vllm_tensor_parallel_size=1, 
         vllm_gpu_memory_utilization=0.3,
-        vllm_enable_sleep_mode=True, 
+        vllm_enable_sleep_mode=False,  # Not applicable for external server 
         learning_rate = args.learning_rate,
         warmup_ratio = 0.1,
         lr_scheduler_type = "cosine",
@@ -77,20 +86,21 @@ if __name__ == "__main__":
         max_prompt_length = 1024,
         max_completion_length = 1024,
         num_train_epochs = args.num_train_epochs,
+        max_steps = 100,  # Set max steps since dataset may not have length
         save_steps = 100,
         max_grad_norm = 1,
-        report_to = "wandb",
+        report_to = "none",  # Disable wandb to avoid login requirements
         output_dir = args.output_dir,
         log_completions = False, # True for debugging
-        sync_ref_model = True,
+        sync_ref_model = False,  # Can't sync to external vLLM server
         ref_model_sync_steps = 1,
         ref_model_mixup_alpha = args.ref_model_mixup_alpha,
-        vllm_importance_sampling_correction = True,
+        vllm_importance_sampling_correction = False,  # Disabled for external server
         num_loss_tokens_to_skip = 3,
     )
     trainer = DistilTrainer(
         model=model,
-        ref_model=teacher_model,
+        ref_model=None,  # No local ref model needed (beta=0, using external vLLM)
         args=config,
         train_dataset=dataset,
         processing_class=tokenizer,
