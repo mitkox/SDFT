@@ -1,8 +1,14 @@
 .vscode/
 __pycache__/
 *.pyc
+distillation/
+.venv/
+venv/
 
 wandb/
 results/
 bsub_outputs/
 .hyperparameter_search_scripts_main/
+
+output/
+data/generated/

@@ -1,0 +1,5 @@
+# Optional dependencies (only install if you need them)
+wandb>=0.16.0
+pandas>=2.0.0
+deepspeed>=0.13.0
+flashinfer-python>=0.1.0

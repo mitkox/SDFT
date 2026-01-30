@@ -1,6 +1,6 @@
-# On-Policy Self-Distillation with External Teacher
+# Self-Distillation (External Teacher via vLLM)
 
-This is TRL-based code for reproducing the paper "Self-Distillation Enables Continual Learning", modified to support external vLLM teacher models for efficient distillation.
+This repo provides a TRL-based training loop for on-policy self-distillation using an external teacher served via vLLM (OpenAI-compatible HTTP API).
 
 ## Key Features
 
@@ -15,14 +15,14 @@ Continual learning, enabling models to acquire new skills and knowledge without 
 
 ## Setup
 
-### 1. Clone the repository
+### 1) Clone the repository
 
 ```bash
-git clone https://github.com/mitkox/SDFT.git
-cd SDFT
+git clone <YOUR_GITHUB_REPO_URL>.git
+cd Self-Distillation
 ```
 
-### 2. Set up a virtual environment
+### 2) Set up a virtual environment
 
 Using **venv**:
 
@@ -38,16 +38,21 @@ conda create -n distillation python=3.12
 conda activate distillation
 ```
 
-### 3. Install dependencies
+### 3) Install dependencies
 
-**For NVIDIA GB10 GPU (CUDA 13.0/13.1 - RTX 50 series):**
+Install PyTorch first, then Python dependencies.
+
+**For NVIDIA GB10 (CUDA 13.1):**
 
 ```bash
-# Install PyTorch nightly with CUDA 13.0 support first
+# Install PyTorch nightly with CUDA 13.x support first (CUDA 13.1 driver is fine).
+# If `cu131` wheels are not available yet, try `cu130`.
 pip uninstall -y torch torchvision torchaudio
 pip install --pre --upgrade --no-cache-dir \
   torch torchvision torchaudio \
-  --index-url https://download.pytorch.org/whl/nightly/cu130
+  --index-url https://download.pytorch.org/whl/nightly/cu131
+  # fallback:
+  # --index-url https://download.pytorch.org/whl/nightly/cu130
 
 # Then install other dependencies
 pip install -r requirements.txt
@@ -60,29 +65,43 @@ pip install -r requirements.txt
 pip install --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
 ```
 
-**Note**: The dependency conflict warning about `cuda-python` and `cuda-bindings` versions is expected and won't affect functionality.
-
-### 4. Set up the Teacher Model (vLLM Server)
+### 4) Set up the Teacher (vLLM server)
 
 Start a vLLM server with your teacher model on port 8000:
 
 ```bash
-vllm serve THUDM/glm-4-9b-chat --port 8000
+vllm serve <your-teacher-model> --port 8000 --served-model-name glm-4.7
 ```
 
-Or for a larger model:
+If you are using tensor parallelism:
 
 ```bash
-vllm serve <your-teacher-model> --port 8000 --tensor-parallel-size 1
+vllm serve <your-teacher-model> --port 8000 --served-model-name glm-4.7 --tensor-parallel-size 1
 ```
 
 The teacher model generates high-quality training examples that the student model learns from.
 
-### 5. Prepare Your Data
+Verify the server:
 
-Place your training data in `data/tooluse_data/`:
-- `train_data.json` - Training examples
-- `eval_data.json` - Evaluation examples (optional)
+```bash
+curl http://localhost:8000/v1/models
+```
+
+Tip (continuous batching): If you run vLLM with continuous batching, you can often increase training throughput by
+setting `--vllm_server_max_concurrency` to a value like `4-16` so the trainer submits multiple parallel requests.
+
+Verify your Python/PyTorch/CUDA stack:
+
+```bash
+python scripts/check_env.py
+```
+
+### 5) Prepare data
+
+This repo includes an example dataset in `data/tooluse_data/`:
+- `data/tooluse_data/train_data.json` - training examples
+- `data/tooluse_data/eval_data.json` - evaluation examples
+- `data/tooluse_data/sample_train.json` - tiny smoke-test dataset
 
 Data format:
 ```json
@@ -94,15 +113,37 @@ Data format:
 ]
 ```
 
-### 6. Run Training
+Generate a dataset with the provided script (writes to `data/generated/tooluse_data/` by default):
 
 ```bash
-python main.py \
-  --model_name Qwen/Qwen3-0.6B \
+python3 generate_data.py --base_url http://localhost:8000/v1 --model glm-4.7 --train_samples 100 --eval_samples 20
+```
+
+### 6) Run training
+
+```bash
+python3 main.py \
   --output_dir ./output \
+  --model_name_or_path Qwen/Qwen3-0.6B \
+  --train_data_path data/tooluse_data/train_data.json \
   --learning_rate 2e-5 \
   --num_train_epochs 1 \
-  --num_prompts_per_batch 32
+  --num_prompts_per_batch 32 \
+  --vllm_server_base_url http://localhost:8000 \
+  --vllm_server_model glm-4.7 \
+  --vllm_server_max_concurrency 8
+```
+
+If your machine cannot download from Hugging Face (offline), add `--local_files_only` and make sure the model is cached.
+
+Dataset selection behavior:
+- If you **don’t** pass `--train_data_path`, `main.py` will use `data/tooluse_data/train_data.json` if it exists, otherwise it falls back to `data/tooluse_data/sample_train.json`.
+- To train on newly generated data, point `--train_data_path` at `data/generated/tooluse_data/train_data.json`.
+
+Sanity check without training:
+
+```bash
+python3 main.py --output_dir ./output --dry_run
 ```
 
 ## Architecture
@@ -125,7 +166,7 @@ python main.py \
 The training uses the following key configurations:
 
 - **vLLM Mode**: `server` - connects to external vLLM server
-- **Teacher**: External GLM-4.7 model on port 8000
+- **Teacher**: External teacher model served as `glm-4.7` on port 8000
 - **Student**: Qwen3-0.6B loaded on GPU
 - **Batch Size**: 1 per device with gradient accumulation
 - **Max Lengths**: 1024 tokens for both prompt and completion
@@ -134,13 +175,14 @@ The training uses the following key configurations:
 
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `--model_name` | `Qwen/Qwen3-0.6B` | Student model path |
-| `--output_dir` | - | Output directory for checkpoints |
-| `--learning_rate` | `2e-5` | Learning rate |
-| `--num_train_epochs` | `1` | Number of training epochs |
-| `--num_prompts_per_batch` | `32` | Prompts per batch (gradient accumulation) |
-| `--ref_model_mixup_alpha` | `0.01` | Reference model mixup alpha |
-| `--seed` | `42` | Random seed |
+| `--model_name_or_path` | `Qwen/Qwen3-0.6B` | Student model name/path |
+| `--train_data_path` | auto | Training JSON (auto-picks `data/tooluse_data/train_data.json` if present) |
+| `--output_dir` | - | Output directory |
+| `--num_prompts_per_batch` | `32` | Convenience alias for `--gradient_accumulation_steps` |
+| `--vllm_server_base_url` | - | Teacher server base URL (e.g., `http://localhost:8000`) |
+| `--vllm_server_model` | `glm-4.7` | Served teacher model name |
+| `--vllm_server_max_concurrency` | `1` | Concurrent HTTP requests to vLLM (useful with continuous batching) |
+| `--dry_run` | `False` | Load everything and exit |
 
 ## Troubleshooting
 

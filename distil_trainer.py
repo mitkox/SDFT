@@ -463,8 +463,16 @@ class DistilTrainer(BaseTrainer):
                         client_tokenizer = self.processing_class.tokenizer
                     else:
                         client_tokenizer = self.processing_class
-                    self.vllm_client = VLLMClient(base_url=base_url, connection_timeout=args.vllm_server_timeout, tokenizer=client_tokenizer)
-                    self.vllm_client.init_communicator(device=torch.cuda.current_device())
+                    self.vllm_client = VLLMClient(
+                        base_url=base_url,
+                        connection_timeout=args.vllm_server_timeout,
+                        tokenizer=client_tokenizer,
+                        default_model=getattr(args, "vllm_server_model", None),
+                        api_key=getattr(args, "vllm_server_api_key", None),
+                        max_concurrent_requests=getattr(args, "vllm_server_max_concurrency", 1),
+                    )
+                    device = torch.device("cuda", torch.cuda.current_device()) if torch.cuda.is_available() else None
+                    self.vllm_client.init_communicator(device=device, startup_timeout_s=args.vllm_server_timeout)
 
             elif self.vllm_mode == "colocate":
                 # Make sure vllm_tensor_parallel_size group size evenly divides the world size - each group should have
@@ -1351,6 +1359,21 @@ class DistilTrainer(BaseTrainer):
             forward_kwargs,
         ) = self._generate(generation_prompts, images)
 
+        if (
+            self.use_vllm
+            and self.vllm_importance_sampling_correction
+            and not self.generate_from_teacher
+            and (
+                sampling_per_token_logps_list is None
+                or all((not logps) for logps in sampling_per_token_logps_list)
+            )
+        ):
+            raise ValueError(
+                "vLLM server generation did not return per-token logprobs, but "
+                "`vllm_importance_sampling_correction=True` is enabled. Disable importance sampling correction or "
+                "configure your vLLM server/endpoint to return logprobs."
+            )
+
         # Process student prompts (always used for student training, regardless of generation source)
         prompts_text = [
             maybe_apply_chat_template({"prompt": prompt}, self.processing_class)["prompt"] for prompt in prompts
@@ -1633,6 +1656,30 @@ class DistilTrainer(BaseTrainer):
             image_sizes=inputs.get("image_sizes"),
             token_type_ids=inputs.get("token_type_ids"),
         )
+
+        # If no local teacher model is provided (e.g., you generate completions from an external vLLM teacher),
+        # fall back to a plain imitation/SFT objective on the generated completion tokens.
+        if self.ref_model is None:
+            token_count = loss_completion_mask.sum(-1).clamp(min=1.0)
+            per_seq_nll = -((per_token_logps * loss_completion_mask).sum(-1) / token_count)
+            loss = per_seq_nll.mean() / self.current_gradient_accumulation_steps
+
+            mode = "train" if self.model.training else "eval"
+            with torch.no_grad():
+                self._metrics[mode]["nll"].append(self.accelerator.gather(per_seq_nll.mean()).nanmean().item())
+
+                loss_completion_token_count = loss_completion_mask.sum().clamp(min=1.0)
+
+                def masked_batch_mean(x):
+                    if x.shape[1] == 1:  # when importance_sampling_level == "sequence"
+                        return x.mean()
+                    else:
+                        return (x * loss_completion_mask).sum() / loss_completion_token_count
+
+                mean_entropy = masked_batch_mean(entropies)
+                self._metrics[mode]["entropy"].append(self.accelerator.gather(mean_entropy).nanmean().item())
+
+            return loss
 
         with torch.no_grad():
             teacher_per_token_logps, teacher_all_logps, teacher_entropies = self._get_per_token_logps_and_entropies(

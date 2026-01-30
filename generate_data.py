@@ -6,15 +6,14 @@ This script creates diverse question-answer pairs with step-by-step reasoning.
 
 import json
 import random
+import argparse
+from pathlib import Path
 from openai import OpenAI
 from tqdm import tqdm
 from typing import List, Dict
 
-# Configure vLLM client
-client = OpenAI(
-    base_url="http://localhost:8000/v1",
-    api_key="dummy"
-)
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="dummy")
+MODEL_NAME: str = "glm-4.7"
 
 # Topic categories for diverse data generation
 TOPICS = [
@@ -49,6 +48,32 @@ TASK_TYPES = [
 ]
 
 
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Generate JSON training/eval data via an OpenAI-compatible vLLM server.")
+    p.add_argument("--base_url", type=str, default="http://localhost:8000/v1", help="vLLM OpenAI base URL.")
+    p.add_argument("--api_key", type=str, default="dummy", help="API key (vLLM usually ignores this).")
+    p.add_argument(
+        "--model",
+        type=str,
+        default="glm-4.7",
+        help="Served model name (see `vllm serve --served-model-name`).",
+    )
+    p.add_argument("--train_samples", type=int, default=100, help="Number of training samples to generate.")
+    p.add_argument("--eval_samples", type=int, default=20, help="Number of eval samples to generate.")
+    p.add_argument(
+        "--out_dir",
+        type=str,
+        default="data/generated/tooluse_data",
+        help="Output directory (kept separate to avoid overwriting bundled datasets).",
+    )
+    p.add_argument("--seed", type=int, default=42, help="Random seed.")
+    return p.parse_args()
+
+
+def make_client(base_url: str, api_key: str) -> OpenAI:
+    return OpenAI(base_url=base_url, api_key=api_key)
+
+
 def generate_prompt(topic: str, task_type: str) -> str:
     """Generate a diverse prompt based on topic and task type."""
     prompt_template = f"""Generate a single technical question or coding task about {topic}.
@@ -57,7 +82,7 @@ Make it specific, practical, and suitable for a technical interview or learning 
 Output ONLY the question/task, nothing else."""
 
     response = client.chat.completions.create(
-        model="glm-4.7",
+        model=MODEL_NAME,
         messages=[{"role": "user", "content": prompt_template}],
         temperature=0.9,
         max_tokens=150,
@@ -77,7 +102,7 @@ Provide your answer as a series of clear steps or reasoning points. Show your th
 Break down your response into numbered steps or logical parts."""
 
     response = client.chat.completions.create(
-        model="glm-4.7",
+        model=MODEL_NAME,
         messages=[{"role": "user", "content": response_template}],
         temperature=0.7,
         max_tokens=800,
@@ -156,11 +181,19 @@ def generate_dataset(num_samples: int, desc: str = "Generating") -> List[Dict]:
 
 
 def main():
+    args = parse_args()
+    random.seed(args.seed)
+
+    global client  # noqa: PLW0603 - keep existing function signatures
+    global MODEL_NAME  # noqa: PLW0603
+    client = make_client(args.base_url, args.api_key)
+    MODEL_NAME = args.model
+
     print("=" * 60)
     print("Data Generation Script for Self-Distillation")
     print("=" * 60)
-    print(f"vLLM Server: http://localhost:8000")
-    print(f"Model: glm-4.7")
+    print(f"vLLM Server: {args.base_url}")
+    print(f"Model: {MODEL_NAME}")
     print()
     
     # Test connection
@@ -170,32 +203,35 @@ def main():
         print(f"✓ Connected! Available models: {[m.id for m in models.data]}")
     except Exception as e:
         print(f"✗ Failed to connect to vLLM server: {e}")
-        print("Make sure vLLM is running on http://localhost:8000")
+        print(f"Make sure vLLM is running on {args.base_url}")
         return
     
     print()
     
     # Generate training data
     print("Generating training data...")
-    train_data = generate_dataset(100, desc="Training samples")
+    train_data = generate_dataset(args.train_samples, desc="Training samples")
     
     print(f"\n✓ Generated {len(train_data)} training samples")
     
     # Generate evaluation data
     print("\nGenerating evaluation data...")
-    eval_data = generate_dataset(20, desc="Evaluation samples")
+    eval_data = generate_dataset(args.eval_samples, desc="Evaluation samples")
     
     print(f"\n✓ Generated {len(eval_data)} evaluation samples")
     
     # Save training data
-    train_path = "data/tooluse_data/train_data.json"
-    with open(train_path, 'w', encoding='utf-8') as f:
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    train_path = out_dir / "train_data.json"
+    with open(train_path, "w", encoding="utf-8") as f:
         json.dump(train_data, f, indent=2, ensure_ascii=False)
     print(f"\n✓ Saved training data to {train_path}")
     
     # Save evaluation data
-    eval_path = "data/tooluse_data/eval_data.json"
-    with open(eval_path, 'w', encoding='utf-8') as f:
+    eval_path = out_dir / "eval_data.json"
+    with open(eval_path, "w", encoding="utf-8") as f:
         json.dump(eval_data, f, indent=2, ensure_ascii=False)
     print(f"✓ Saved evaluation data to {eval_path}")
     
@@ -205,7 +241,6 @@ def main():
     print(f"Training samples: {len(train_data)}")
     print(f"Evaluation samples: {len(eval_data)}")
     print("\nYou can now run training with:")
-    print("  source distillation/bin/activate")
     print("  python main.py --output_dir ./output")
     print("=" * 60)
 

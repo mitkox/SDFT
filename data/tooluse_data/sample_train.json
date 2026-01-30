@@ -1,0 +1,19 @@
+[
+  {
+    "prompt": "Write a Python function `is_palindrome(s: str) -> bool` that returns True if `s` is a palindrome ignoring case and non-alphanumeric characters.",
+    "golden_response": [
+      "Normalize the string by keeping only alphanumeric characters and converting to lowercase.",
+      "Use two pointers (left/right) to compare characters until they cross; return False on mismatch.",
+      "Return True if all comparisons succeed."
+    ]
+  },
+  {
+    "prompt": "Explain the difference between a process and a thread, and when you would choose one over the other.",
+    "golden_response": [
+      "A process is an OS-level container with its own address space; threads share the same address space within a process.",
+      "Processes provide stronger isolation but have higher overhead; threads are lighter but require careful synchronization.",
+      "Choose processes for isolation/fault containment or CPU-bound parallelism without shared state; choose threads for shared-memory concurrency (e.g., I/O-bound tasks)."
+    ]
+  }
+]
+

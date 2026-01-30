@@ -1,19 +1,11 @@
-datasets==4.3.0
-# PyTorch nightly for GB10 GPU (CUDA 13.0/13.1) support
-# Install with: pip install --pre --upgrade torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu130
-# torch==2.11.0.dev (nightly)
-transformers>=5.0.0
-accelerate==1.11.0
-peft==0.17.1
-rich==14.2.0
-# vllm not needed - using external server
-trl==0.24.0
-openai==2.6.1
-tqdm==4.67.1
-numpy==2.2.6
-scipy==1.15.3
-matplotlib==3.10.7
-flashinfer-python==0.5.3
-wandb==0.22.2
-pandas==2.3.3
-deepspeed==0.18.4
+# Base runtime dependencies (install PyTorch separately; see README.md)
+datasets>=2.20.0
+transformers>=4.46.0
+accelerate>=0.34.0
+trl>=0.24.0
+peft>=0.12.0
+rich>=13.7.0
+tqdm>=4.66.0
+numpy>=1.26.0
+requests>=2.31.0
+openai>=1.0.0

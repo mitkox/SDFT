@@ -434,6 +434,27 @@ class DistilConfig(TrainingArguments):
     )
 
     # Parameters that control the vLLM server (only used when `vllm_mode` is `"server"`)
+    vllm_server_model: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Model name to request from the external vLLM server (e.g., 'glm-4.7'). If None, the HTTP client "
+            "uses its own default."
+        },
+    )
+    vllm_server_api_key: Optional[str] = field(
+        default=None,
+        metadata={
+            "help": "Optional API key for OpenAI-compatible servers that require authorization. Not needed for local "
+            "`vllm serve`."
+        },
+    )
+    vllm_server_max_concurrency: int = field(
+        default=1,
+        metadata={
+            "help": "Max number of concurrent HTTP requests to the vLLM server when generating in `vllm_mode=server`. "
+            "If you run vLLM with continuous batching, increasing this (e.g., 4-16) can improve throughput."
+        },
+    )
     vllm_server_base_url: Optional[str] = field(
         default=None,
         metadata={
@@ -442,7 +463,7 @@ class DistilConfig(TrainingArguments):
         },
     )
     vllm_server_host: str = field(
-        default="0.0.0.0",
+        default="localhost",
         metadata={"help": "Host of the vLLM server to connect to. Ignored if vllm_server_base_url is provided."},
     )
     vllm_server_port: int = field(
@@ -662,7 +683,19 @@ class DistilConfig(TrainingArguments):
     )
 
     def __post_init__(self):
-        self.bf16 = not (self.fp16) if self.bf16 is None else self.bf16
+        # TrainingArguments validates bf16 support during its __post_init__. We set a safe default here:
+        # - If the user didn't explicitly choose bf16/fp16, prefer bf16 only when CUDA is available and supports it.
+        # - Otherwise, default to fp32 on CPU.
+        if self.bf16 is None:
+            if getattr(self, "fp16", False):
+                self.bf16 = False
+            else:
+                try:
+                    import torch
+
+                    self.bf16 = bool(torch.cuda.is_available() and torch.cuda.is_bf16_supported())
+                except Exception:
+                    self.bf16 = False
 
         super().__post_init__()
 
