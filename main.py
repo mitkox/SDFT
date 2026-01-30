@@ -57,8 +57,17 @@ if __name__ == "__main__":
         device_map="auto",  # GPU with PyTorch nightly cu130
         low_cpu_mem_usage=True,
     )
-    # External vLLM server (GLM-4.7) generates completions; no local teacher needed
-    teacher_model = None
+    # Load a local "teacher" model for computing logits (needed for distillation loss)
+    # Since we don't have GLM-4.7 locally, use the student model as teacher
+    # External vLLM server generates the completions, but we need local model for logit computation
+    print("Loading teacher model (copy of student for logit computation)...")
+    teacher_model = AutoModelForCausalLM.from_pretrained(
+        args.model_name,
+        torch_dtype=torch.bfloat16,
+        trust_remote_code=True,
+        device_map="auto",
+        low_cpu_mem_usage=True,
+    )
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_name, 
         trust_remote_code=True,
@@ -98,10 +107,13 @@ if __name__ == "__main__":
         ref_model_mixup_alpha = args.ref_model_mixup_alpha,
         vllm_importance_sampling_correction = False,  # Disabled for external server
         num_loss_tokens_to_skip = 3,
+        alpha = 0.0,  # No KL distillation - pure imitation learning from teacher generations
+        beta = 0.0,  # No KL penalty with reference model
+        full_logit_distillation = False,  # Don't compute teacher logits (teacher is external)
     )
     trainer = DistilTrainer(
         model=model,
-        ref_model=None,  # No local ref model needed (beta=0, using external vLLM)
+        ref_model=teacher_model,  # Local teacher for logit computation (same as student initially)
         args=config,
         train_dataset=dataset,
         processing_class=tokenizer,
